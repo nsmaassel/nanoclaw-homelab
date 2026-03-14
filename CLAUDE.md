@@ -62,3 +62,39 @@ systemctl --user restart nanoclaw
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
+
+---
+
+## Homelab Deployment Context
+
+This instance runs on K3s (beelink-server, control-plane). See the `groups/homelab/CLAUDE.md` for
+full cluster topology, autonomy model, and data sources.
+
+### K3s Management (in agent container)
+```bash
+# Tier 1 — always OK
+kubectl get pods -A
+kubectl describe pod <name> -n <ns>
+kubectl logs <name> -n <ns> --tail=50
+kubectl top nodes
+
+# Tier 2 — confirm with user first
+kubectl rollout restart deployment/<name> -n <ns>
+kubectl delete pod <name> -n <ns>
+kubectl create job --from=cronjob/<name> manual-$(date +%s) -n <ns>
+```
+
+KUBECONFIG is mounted at `~/.kube/config` inside the agent container.
+
+### Data Lake Postgres
+```bash
+# Read-only access (Tier 1)
+psql "$DATALAKE_READONLY_DSN" -c "SELECT ..."
+```
+
+### Discord Webhook Output
+```bash
+curl -s -X POST "$DISCORD_WEBHOOK_URL" \
+  -H "Content-Type: application/json" \
+  -d "{\"content\": \"$MSG\"}"
+```

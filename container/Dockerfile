@@ -3,7 +3,7 @@
 
 FROM node:22-slim
 
-# Install system dependencies for Chromium
+# Install system dependencies for Chromium + homelab tools
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
@@ -24,7 +24,15 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    # Postgres client — for direct data lake queries
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
+
+# Install kubectl for K3s cluster operations (Tier 1 read + Tier 2 safe restarts)
+ARG KUBECTL_VERSION=v1.32.0
+RUN curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+    -o /usr/local/bin/kubectl \
+    && chmod +x /usr/local/bin/kubectl
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
