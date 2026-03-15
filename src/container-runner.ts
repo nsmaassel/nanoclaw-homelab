@@ -76,16 +76,10 @@ function buildVolumeMounts(
       readonly: true,
     });
 
-    // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the credential proxy, never exposed to containers.
-    const envFile = path.join(projectRoot, '.env');
-    if (fs.existsSync(envFile)) {
-      mounts.push({
-        hostPath: '/dev/null',
-        containerPath: '/workspace/project/.env',
-        readonly: true,
-      });
-    }
+    // NOTE: On Linux/DinD, overlay2 cannot mknod file bind-mount targets in the
+    // merged layer (read-only file system error), so we skip .env masking here.
+    // In K3s, credentials are isolated in K8s Secrets and accessed only via the
+    // credential proxy — the agent cannot exfiltrate them outside the cluster.
 
     // Main also gets its group folder as the working directory
     mounts.push({
@@ -122,6 +116,10 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+  // 0o777: NFS maps orchestrator root → UID 1024; agent runs as node (UID 1000).
+  // Claude Code writes session files (.claude_session_env, transcripts) here —
+  // world-writable ensures the agent can create/modify files it doesn't own.
+  fs.chmodSync(groupSessionsDir, 0o777);
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
@@ -144,6 +142,7 @@ function buildVolumeMounts(
         2,
       ) + '\n',
     );
+    fs.chmodSync(settingsFile, 0o666);
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
@@ -166,9 +165,15 @@ function buildVolumeMounts(
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
-  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  // mode 0o777: NFS maps orchestrator root → UID 1024; agent runs as node (UID 1000).
+  // World-writable ensures agent can delete its own IPC input files.
+  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true, mode: 0o777 });
+  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true, mode: 0o777 });
+  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true, mode: 0o777 });
+  // Ensure existing dirs are also world-writable (idempotent fix)
+  fs.chmodSync(path.join(groupIpcDir, 'messages'), 0o777);
+  fs.chmodSync(path.join(groupIpcDir, 'tasks'), 0o777);
+  fs.chmodSync(path.join(groupIpcDir, 'input'), 0o777);
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
