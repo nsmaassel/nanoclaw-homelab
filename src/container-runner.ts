@@ -243,6 +243,11 @@ function buildContainerArgs(
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
 
+  // Forward data lake DSN so the homelab-health skill can query Garmin data
+  if (process.env.DATALAKE_READONLY_DSN) {
+    args.push('-e', `DATALAKE_DSN=${process.env.DATALAKE_READONLY_DSN}`);
+  }
+
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
