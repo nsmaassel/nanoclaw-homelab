@@ -38,6 +38,7 @@ import {
   initDatabase,
   setRegisteredGroup,
   setRouterState,
+  clearSession,
   setSession,
   storeChatMetadata,
   storeMessage,
@@ -299,10 +300,10 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
-  // Wrap onOutput to track session ID from streamed results
+  // Wrap onOutput to track session ID from streamed results (success only)
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
+        if (output.newSessionId && output.status === 'success') {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
         }
@@ -326,7 +327,7 @@ async function runAgent(
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
+    if (output.newSessionId && output.status === 'success') {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
     }
@@ -336,6 +337,13 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Container agent error',
       );
+      // Stale session: Claude Code can't find the session transcript on disk.
+      // Clear it so the next run starts a fresh session instead of looping.
+      if (output.error?.includes('No conversation found with session ID')) {
+        logger.warn({ group: group.name }, 'Stale session detected, clearing for fresh start');
+        delete sessions[group.folder];
+        clearSession(group.folder);
+      }
       return 'error';
     }
 
