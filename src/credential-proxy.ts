@@ -104,7 +104,26 @@ export function startCredentialProxy(
           }
         });
 
-        upstream.write(body);
+        // Inject prompt caching for messages API calls. The body is already
+        // buffered so we can safely parse, augment, and re-serialize.
+        let forwardBody = body;
+        if (
+          req.method === 'POST' &&
+          req.url?.includes('/v1/messages')
+        ) {
+          try {
+            const json = JSON.parse(body.toString('utf8'));
+            if (!json.cache_control) {
+              json.cache_control = { type: 'ephemeral' };
+              forwardBody = Buffer.from(JSON.stringify(json), 'utf8');
+              headers['content-length'] = forwardBody.length;
+            }
+          } catch {
+            // Non-JSON body — forward unchanged
+          }
+        }
+
+        upstream.write(forwardBody);
         upstream.end();
       });
     });

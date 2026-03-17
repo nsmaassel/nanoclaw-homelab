@@ -450,7 +450,12 @@ async function runQuery(
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
+      const costUsd = 'total_cost_usd' in message ? (message as { total_cost_usd?: number }).total_cost_usd : undefined;
+      const usage = 'usage' in message ? (message as { usage?: { cacheReadInputTokens?: number; cacheCreationInputTokens?: number; inputTokens?: number; outputTokens?: number } }).usage : undefined;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      if (usage) {
+        log(`Usage: inputTokens=${usage.inputTokens ?? 0} outputTokens=${usage.outputTokens ?? 0} cacheRead=${usage.cacheReadInputTokens ?? 0} cacheWrite=${usage.cacheCreationInputTokens ?? 0} costUSD=${costUsd?.toFixed(6) ?? 'n/a'}`);
+      }
       writeOutput({
         status: 'success',
         result: textResult || null,
