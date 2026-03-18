@@ -1,0 +1,50 @@
+---
+# ServiceAccount for the Nanoclaw orchestrator
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nanoclaw-reader
+  namespace: nanoclaw
+
+---
+# ClusterRole: read cluster state + limited trigger capability
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nanoclaw-cluster-reader
+rules:
+  # Tier 1 — read freely
+  - apiGroups: [""]
+    resources: [pods, pods/log, nodes, events, namespaces, services, endpoints]
+    verbs: [get, list, watch]
+  - apiGroups: ["apps"]
+    resources: [deployments, statefulsets, daemonsets, replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: ["batch"]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+  # Tier 2 — confirm-first actions (pod restart, cronjob trigger)
+  - apiGroups: ["apps"]
+    resources: [deployments, statefulsets]
+    verbs: [patch]       # for rollout restart (patches deployment annotation)
+  - apiGroups: ["batch"]
+    resources: [jobs]
+    verbs: [create]      # kubectl create job --from=cronjob/<name>
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [delete]      # kill stuck pod (K8s recreates via RS)
+  # Never: delete deployments/namespaces/pvcs, apply configs, read secrets
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nanoclaw-cluster-reader
+subjects:
+  - kind: ServiceAccount
+    name: nanoclaw-reader
+    namespace: nanoclaw
+roleRef:
+  kind: ClusterRole
+  name: nanoclaw-cluster-reader
+  apiGroup: rbac.authorization.k8s.io

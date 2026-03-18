@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nanoclaw-groups
+  namespace: nanoclaw
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nfs-synology
+  resources:
+    requests:
+      storage: 1Gi
