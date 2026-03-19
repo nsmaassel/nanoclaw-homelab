@@ -79,22 +79,6 @@ export function startCredentialProxy(
           }
         }
 
-        // Inject prompt caching for messages API calls BEFORE creating the
-        // upstream request so content-length reflects the modified body size.
-        let forwardBody = body;
-        if (req.method === 'POST' && req.url?.includes('/v1/messages')) {
-          try {
-            const json = JSON.parse(body.toString('utf8'));
-            if (!json.cache_control) {
-              json.cache_control = { type: 'ephemeral' };
-              forwardBody = Buffer.from(JSON.stringify(json), 'utf8');
-              headers['content-length'] = forwardBody.length;
-            }
-          } catch {
-            // Non-JSON body — forward unchanged
-          }
-        }
-
         const upstream = makeRequest(
           {
             hostname: upstreamUrl.hostname,
@@ -120,7 +104,7 @@ export function startCredentialProxy(
           }
         });
 
-        upstream.write(forwardBody);
+        upstream.write(body);
         upstream.end();
       });
     });
