@@ -35,15 +35,15 @@ curl -s 'http://prometheus..../query?query=up' | python3 -c "import json,sys; d=
 ```bash
 # Active alerts right now
 curl -s http://alertmanager.monitoring.svc.cluster.local:9093/api/v1/alerts | \
-  jq '.data[] | select(.status.state=="active") | {name: .labels.alertname, severity: .labels.severity, summary: .annotations.summary}'
+  python3 -c "import json,sys; d=json.load(sys.stdin); [print(a['labels'].get('alertname'), a['labels'].get('severity'), a['annotations'].get('summary','')) for a in d['data'] if a['status']['state']=='active']"
 
 # CPU usage by node (last 5 min)
 curl -s 'http://prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=100-(avg+by(instance)(rate(node_cpu_seconds_total%7Bmode%3D"idle"%7D%5B5m%5D))*100)' | \
-  jq '.data.result[] | {node: .metric.instance, cpu_pct: (.value[1] | tonumber | . * 100 | round / 100)}'
+  python3 -c "import json,sys; d=json.load(sys.stdin); [print(r['metric'].get('instance'), round(float(r['value'][1]),1),'%') for r in d['data']['result']]"
 
 # Memory by pod (top 10)
 curl -s 'http://prometheus.monitoring.svc.cluster.local:9090/api/v1/query?query=sort_desc(container_memory_working_set_bytes%7Bcontainer!%3D""%7D)&limit=10' | \
-  jq '.data.result[:10][] | {pod: .metric.pod, ns: .metric.namespace, mb: (.value[1] | tonumber / 1048576 | round)}'
+  python3 -c "import json,sys; d=json.load(sys.stdin); [print(r['metric'].get('pod'), r['metric'].get('namespace'), round(float(r['value'][1])/1048576),'MB') for r in d['data']['result'][:10]]"
 ```
 
 ## Data Lake Schema Reference
@@ -138,6 +138,42 @@ When answering training questions:
 4. Give specific recommendation based on 80/20 principles
 5. Quantify: "I'd suggest [easy 45 min Zone 2 run] tomorrow rather than your planned tempo"
 
+## n8n Workflow Automation
+
+n8n runs in the `n8n` namespace, **pinned to the Tower node** (nodeSelector). It is unavailable when Tower is down.
+
+- **Cluster DNS**: `http://n8n.n8n.svc.cluster.local:5678`
+- **External (Tower LAN)**: `http://100.73.171.55:5678`
+- **API key**: in `n8n-secrets` as `N8N_API_KEY` env var (JWT, rotated ~90 days)
+- **Auth header**: `X-N8N-API-KEY: <key>`
+
+### Key Workflows
+
+| Name | Schedule | Purpose |
+|------|----------|---------|
+| Garmin Daily Brief | Daily 15:00 | Queries data lake → formats health summary → emails |
+| Langfuse Spend Alert | Daily 16:00 | Checks Langfuse usage costs → alerts if over budget |
+| Media Notifications | On webhook | Discord notification for new Plex media |
+| CronJob_Fix_Pipeline | On alert | Auto-detects + attempts to fix failed K8s CronJobs |
+| PR_Notification | On GitHub webhook | Posts PR events to Discord + Telegram |
+| Alertmanager Webhook | On alert | Routes Prometheus alerts to Telegram/Discord |
+
+### Querying n8n Executions (from agent pod)
+
+```bash
+# List recent workflow executions (avoid ?status= filter — it hangs)
+curl -s -H "X-N8N-API-KEY: $N8N_API_KEY" \
+  http://n8n.n8n.svc.cluster.local:5678/api/v1/executions?limit=20 | \
+  python3 -c "import json,sys; d=json.load(sys.stdin); [print(e['id'], e['workflowData']['name'], e['status']) for e in d['data']]"
+
+# List workflows
+curl -s -H "X-N8N-API-KEY: $N8N_API_KEY" \
+  http://n8n.n8n.svc.cluster.local:5678/api/v1/workflows | \
+  python3 -c "import json,sys; d=json.load(sys.stdin); [print(w['id'], w['name'], 'active' if w['active'] else 'inactive') for w in d['data']]"
+```
+
+**Note**: `N8N_API_KEY` is not auto-injected into agent pods. If you need it, it's in the `n8n-secrets` secret in the `n8n` namespace. Ask the user to provide it or have them mount it.
+
 ## Common Workflows
 
 ### "Why is [pod] crashing?"
@@ -156,7 +192,27 @@ When answering training questions:
 ### "What CronJobs failed recently?"
 ```bash
 kubectl get jobs -A --sort-by='.metadata.creationTimestamp' | tail -20
-# For a specific namespace
+# For a specific namespace (use python3 instead of jq)
 kubectl get jobs -n data-lake -o json | \
-  jq '.items[] | select(.status.failed>0) | {name: .metadata.name, failed: .status.failed}'
+  python3 -c "import json,sys; d=json.load(sys.stdin); [print(j['metadata']['name'], j['status'].get('failed',0)) for j in d['items'] if j['status'].get('failed',0)>0]"
 ```
+
+### "Is Tower (worker node) down?"
+
+Tower hosts n8n, Postgres data lake, Langfuse, Klahanie, and monitoring. When it goes down, many services become unavailable.
+
+```bash
+# Quick node status check
+kubectl get nodes -o wide
+
+# If tower shows NotReady — check when it went down
+kubectl describe node tower | grep -A3 "Conditions:"
+
+# List all pods stuck Terminating on tower
+kubectl get pods -A -o wide | grep tower | grep -v Running | grep -v Completed
+
+# Verify Tailscale reachability
+ping -c 2 100.73.171.55
+```
+
+**If Tower is unreachable**: Inform the user — Tower likely needs a physical power cycle or SSH login to restart k3s agent (`sudo systemctl restart k3s-agent`). Nothing can be auto-recovered remotely if Tailscale is also down.
