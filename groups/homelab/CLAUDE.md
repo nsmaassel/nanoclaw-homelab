@@ -2,6 +2,14 @@
 
 This group has access to the homelab K3s cluster, data lake, and monitoring stack.
 
+## Environment Setup
+
+`jq` is not pre-installed. Install it before running monitoring queries:
+```bash
+apt-get install -y jq -q 2>/dev/null
+```
+Or use `python3 -c "import json,sys; data=json.load(sys.stdin); ..."` as an alternative.
+
 ## Cluster Topology
 
 | Node | Role | IP | Notes |
